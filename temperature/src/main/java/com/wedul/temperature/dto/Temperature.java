@@ -1,16 +1,11 @@
 package com.wedul.temperature.dto;
 
-import lombok.Data;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
 
-/**
- *
- * reactive
- *
- * @author wedul
- * @version
- * @since 2019-12-07
- **/
-@Data
+@Getter
+@AllArgsConstructor
 public class Temperature {
-	private final double value;
+
+	private double temperature;
 }
