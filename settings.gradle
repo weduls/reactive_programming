@@ -1,2 +1,2 @@
 rootProject.name = 'reactive'
-include 'temperature', 'rxjava-temperature'
+include 'temperature', 'rxjava-temperature', 'reactive-test'

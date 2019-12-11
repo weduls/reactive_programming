@@ -1,0 +1,8 @@
+bootJar { enabled = true }
+jar { enabled = false }
+
+dependencies {
+	compile('io.projectreactor:reactor-core:3.2.0.RELEASE')
+
+	testCompile('io.projectreactor:reactor-test:3.2.0.RELEASE')
+}
