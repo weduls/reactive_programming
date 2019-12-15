@@ -7,7 +7,9 @@ import org.springframework.beans.factory.InitializingBean;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.BaseSubscriber;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink;
 import reactor.core.publisher.SynchronousSink;
+import reactor.util.function.Tuple2;
 
 import java.time.Instant;
 import java.util.Random;
@@ -18,11 +20,77 @@ import java.util.function.Consumer;
 public class ReactiveTest implements InitializingBean {
 
     public void test() {
+        // generate의 경우 subscribe가 있어야 발생하는 pull 방식
         subscribe();
         t1T2();
         predicate();
         threeItemGenerateSub();
         generateTwoParameter();
+
+        // create (generate와 다른점은 generate의 경우 데이터를 한번에 하나만 보낼 수 있으나 create는 여러개 전달 가능)
+//        createFlux();
+
+        // 데이터 1대1 변환
+        Flux<String> data = Flux.just("a", "bc", "def", "wxyz");
+        fluxStrToInteger(data).subscribe(this::print);
+
+        // 데이터 1대 n 변환
+        fluxStrToFlatMap(data).subscribe(this::print);
+
+        // filter 걸러내기
+        fluxFilterLengthgteThree(data).subscribe(this::print);
+
+        // merge (stream 발생 순서대로 merge)
+        merge(data, Flux.range(1, 2)).subscribe(s -> log.info("merge data {}", s));
+
+        // zip with (merge는 실행 속도로 묶는다면 시퀀스 하나 하나 순서대로 같이 매핑한다.), 합쳐지지 못한 스트림은 사라짐
+        zipMapping(data, Flux.range(1, 2).map(d -> d.toString())).subscribe(s -> log.info("zip with data {}", s));
+
+        // skip
+        data.skipUntil(d -> d.length() >= 3).subscribe(s -> log.info("skip until {}", s));
+    }
+
+    private Flux<Tuple2<String, String>> zipMapping(Flux<String> data, Flux<String> data1) {
+        return data.zipWith(data1);
+    }
+
+    private Flux<String> merge(Flux<String> data, Flux<Integer> subData) {
+        return data.mergeWith(subData.map(z -> z.toString()));
+    }
+
+    private void print(Object s) {
+        log.info("data content : {}", s);
+    }
+
+    private Flux<String> fluxFilterLengthgteThree(Flux<String> data) {
+        return data.filter(str -> str.length() >= 3);
+    }
+
+    private Flux<Integer> fluxStrToFlatMap(Flux<String> data) {
+        return data.flatMap(i -> Flux.range(1, i.length()));
+    }
+
+    private Flux<Integer> fluxStrToInteger(Flux<String> data) {
+        /**
+         * 1 -> Flux.range(1, 1) : [1] 생성
+         * 2 -> Flux.range(1, 2) : [1, 2] 생성
+         * 3 -> Flux.range(1, 3) : [1, 2, 3] 생성
+         * 이런 식으로 매핑되어서 Flux<Flux<Integer>>로 보이지만 실제로 스트림이 Flux<Integer>로 스트림이 합쳐진다.
+         */
+        return data.map(t -> t.length());
+    }
+
+    private void createFlux() {
+        Flux<Integer> flux = Flux.create((FluxSink<Integer> sink) -> {
+            sink.onRequest(request -> {
+                // request는 요청 건수
+                for (int i = 0; i < request; i++) {
+                    sink.next(i);
+                }
+            });
+        });
+
+        flux.subscribe(System.out::print);
     }
 
     // generate 2 parameter
