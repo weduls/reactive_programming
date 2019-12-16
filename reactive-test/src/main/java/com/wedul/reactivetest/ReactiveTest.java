@@ -9,10 +9,12 @@ import reactor.core.publisher.BaseSubscriber;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
 import reactor.core.publisher.SynchronousSink;
+import reactor.core.scheduler.Schedulers;
 import reactor.util.function.Tuple2;
 
 import java.time.Instant;
 import java.util.Random;
+import java.util.concurrent.CountDownLatch;
 import java.util.function.Consumer;
 
 @Slf4j
@@ -63,6 +65,12 @@ public class ReactiveTest implements InitializingBean {
 
         // retry when
         retryWhen(data);
+
+        // publishOn을 이용한 별도 쓰레드에서 비동기 작업 처리
+        publishOn(data);
+
+        // subscribe
+        subscribeOn(data);
     }
 
     private void retryWhen(Flux<String> data) {
@@ -80,6 +88,7 @@ public class ReactiveTest implements InitializingBean {
             .subscribe(System.out::print, e -> log.info("{}", e.getMessage()));
 
         // 2번 시도 후 에러 발생
+        // retryWhen은 Flux<Throwable>에 따라서 에러를 발생시키기도 하고 아니기도 하다.
         getCotainErrorMap(data)
             .retryWhen(errorsFlux -> errorsFlux.zipWith(Flux.range(1, 3),
                 (error, index) -> {
@@ -89,8 +98,76 @@ public class ReactiveTest implements InitializingBean {
                     throw new RuntimeException("companion error");
                 })
             ).subscribe(System.out::print, e -> log.info("{}", e.getMessage()));
+    }
 
-        // retryWhen은 Flux<Throwable>에 따라서 에러를 발생시키기도 하고 아니기도 하다.
+    private void subscribeOn(Flux<String> data) {
+        CountDownLatch latch = new CountDownLatch(1);
+        data.log()
+            .subscribeOn(Schedulers.newElastic("elastic"))
+            .map(i -> {
+                log.info("map : {} + 1", i.length());
+                return i.length() + 1;
+            })
+            .subscribe(new BaseSubscriber<Integer>() {
+
+                @Override
+                protected void hookOnSubscribe(Subscription subscription) {
+                    log.info("hookOnSubscribe"); // main thread
+                    request(1);
+                }
+
+                @Override
+                protected void hookOnNext(Integer value) {
+                    log.info("hookOnNext: " + value); // SUB 쓰레드
+                    request(1);
+                }
+
+                @Override
+                protected void hookOnComplete() {
+                    log.info("hookOnComplete"); // SUB 쓰레드
+                    latch.countDown();
+                }
+
+            });
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void publishOn(Flux<String> data) {
+        CountDownLatch latch = new CountDownLatch(1);
+
+        data.map(d -> d + "zz")
+            // 첫번째 인자는 비동기 신호 처리 스케줄러, 미리 가져올 버퍼 크기 (비동기 경계시점에 미리 가져올 데이터 개수)
+            .publishOn(Schedulers.newElastic("PUB"), 2)
+            .map(d -> d.length())
+            .subscribe(new BaseSubscriber<Integer>() {
+
+                @Override
+                protected void hookOnSubscribe(Subscription subscription) {
+                    log.info("hookOnSubscribe");
+                    requestUnbounded();
+                }
+
+                @Override
+                protected void hookOnNext(Integer value) {
+                    log.info("hookOnNext: " + value); // publishOn에서 지정한 스케줄러가 실행
+                }
+
+                @Override
+                protected void hookOnComplete() {
+                    log.info("hookOnComplete"); // publishOn에서 지정한 스케줄러가 실행
+                    latch.countDown();
+                }
+            });
+
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
     }
 
     private void replaceError(Flux<String> data) {
