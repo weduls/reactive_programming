@@ -48,6 +48,85 @@ public class ReactiveTest implements InitializingBean {
 
         // skip
         data.skipUntil(d -> d.length() >= 3).subscribe(s -> log.info("skip until {}", s));
+
+        // 에러 처리
+        makeError(data);
+
+        // 에러 발생 시 대체값 사용
+        whenErrorReplaceValue(data);
+
+        // 에러 발생 시 값 대처
+        replaceFlux(data);
+
+        // 에러 발생 시 다른 에러로 대처
+        replaceError(data);
+
+        // retry when
+        retryWhen(data);
+    }
+
+    private void retryWhen(Flux<String> data) {
+        /*
+             retry when는 Function<Flux<Throwable>, ? extends Publisher<?> whenFactory) 인자를 받는데
+             Flux<Throwable>은 에러 exception에 해당된다.
+
+             그래서 순서는 에러가 발생하면 Flux<Throwable>에 전달되고 Flux<Throwable>의 상태에 따라 에러를 전파하거나 재시도하거나 종료한다.
+         */
+        getCotainErrorMap(data)
+            .retryWhen(
+                // 2번에 에러 발생 또한 재시도를 할 경우에는 에러를 subscribe에게 리턴하지 않는다.
+                err -> err.take(2)
+            )
+            .subscribe(System.out::print, e -> log.info("{}", e.getMessage()));
+
+        // 2번 시도 후 에러 발생
+        getCotainErrorMap(data)
+            .retryWhen(errorsFlux -> errorsFlux.zipWith(Flux.range(1, 3),
+                (error, index) -> {
+                    if (index < 3) {
+                        return index;
+                    }
+                    throw new RuntimeException("companion error");
+                })
+            ).subscribe(System.out::print, e -> log.info("{}", e.getMessage()));
+
+        // retryWhen은 Flux<Throwable>에 따라서 에러를 발생시키기도 하고 아니기도 하다.
+    }
+
+    private void replaceError(Flux<String> data) {
+        getCotainErrorMap(data)
+            .onErrorMap(e -> new CustomException("다른 에러다!"))
+            .subscribe(System.out::print, e -> log.info("{}", e.getMessage()));
+    }
+
+    private void makeError(Flux<String> data) {
+        getCotainErrorMap(data).subscribe(System.out::print, i -> log.error("에러발생!!", i.getMessage()), () -> log.info("complete"));
+    }
+
+    private Flux<String> getCotainErrorMap(Flux<String> data) {
+        return data.map(x -> {
+            if (x.length() == 3) {
+                throw new RuntimeException("에러가 발생했다.");
+            }
+            return x;
+        });
+    }
+
+    private void replaceFlux(Flux<String> data) {
+        getCotainErrorMap(data)
+            .onErrorResume(error -> {
+                if (error instanceof RuntimeException) {
+                    return Flux.just("11");
+                }
+                return Flux.just("zz");
+            })
+            .subscribe(System.out::print, i -> log.error("에러발생!!", i.getMessage()), () -> log.info("complete"));
+    }
+
+    private void whenErrorReplaceValue(Flux<String> data) {
+        getCotainErrorMap(data)
+            .onErrorReturn("-2")
+            .subscribe(System.out::print, i -> log.error("에러발생!!", i.getMessage()), () -> log.info("complete"));
     }
 
     private Flux<Tuple2<String, String>> zipMapping(Flux<String> data, Flux<String> data1) {
@@ -218,5 +297,11 @@ public class ReactiveTest implements InitializingBean {
     @Override
     public void afterPropertiesSet() throws Exception {
         test();
+    }
+
+    private class CustomException extends RuntimeException {
+        public CustomException(String message) {
+            super(message);
+        }
     }
 }
